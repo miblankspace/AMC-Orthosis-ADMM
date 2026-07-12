@@ -61,7 +61,7 @@ int read_input(int16_t *buffer, int buf_len)
     int frames = bytes_read / 8;
     int output_samples = 0;
 
-    for(int i = 0; i < frames && output_samples < buffer_len; i++)
+    for(int i = 0; i < frames && output_samples < buf_len; i++)
     {
         // SEL connected to GND (left channel) by default
         int32_t raw = samples[i * 2];

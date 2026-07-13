@@ -1,2 +1,2 @@
-idf_component_register(SRCS "state_machine.cpp" "edge_impulse.cpp" "main.cpp" "microphone.cpp"
-                    INCLUDE_DIRS ".")
+idf_component_register(SRCS "main.cpp"
+                    INCLUDE_DIRS "." "microphone" "state_machine" "enums" "edge_impulse" "classifier")

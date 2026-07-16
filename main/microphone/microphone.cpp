@@ -2,9 +2,13 @@
 #include <stdint.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/queue.h"
 #include "driver/i2s_std.h"
 #include "esp_err.h"
+#include "esp_log.h"
 #include "microphone.h"
+
+static const char* TAG = "Microphone";
 
 #define I2S_BCLK 15
 #define I2S_WS 17
@@ -12,8 +16,14 @@
 
 #define SAMPLE_RATE 16000
 #define MIC_MAX_SAMPLES 4000
+#define QUEUE_DEPTH 3
 
-i2s_chan_handle_t rx_chan;
+static i2s_chan_handle_t rx_chan;
+static QueueHandle_t mic_queue; // holds EI_CLASSIFIER_SIZE int16_t samples per item
+
+
+static int32_t dc_estimate = 0;
+static int32_t samples[MIC_MAX_SAMPLES * 2];
 
 // mic config
 void init_i2s()
@@ -46,45 +56,71 @@ void init_i2s()
     // initialize and enable channel
     ESP_ERROR_CHECK(i2s_channel_init_std_mode(rx_chan, &std_cfg));
     ESP_ERROR_CHECK(i2s_channel_enable(rx_chan));
+
+    mic_queue = xQueueCreate(QUEUE_DEPTH, EI_CLASSIFIER_SLICE_SIZE * sizeof(int16_t));
+    if (!mic_queue)
+    {
+        ESP_LOGE(TAG, "Failed to create mic queue");
+    }
 }
 
-static int32_t dc_estimate = 0;
-static int32_t samples[MIC_MAX_SAMPLES * 2];
-
-// collect samples, write into buffer, return # of samples collected
-int read_input(int16_t *buffer, int buf_len)
+// runs forever on its own task, signal processing, pushes into mic_queue to be read by EI
+static void mic_task(void* arg)
 {
-    size_t bytes_read = 0;
+    static int16_t slice[EI_CLASSIFIER_SLICE_SIZE];
+    int slice_pos = 0;
 
-    ESP_ERROR_CHECK(i2s_channel_read(rx_chan, samples, sizeof(samples), &bytes_read, portMAX_DELAY));
-
-    // stereo = left + right 32-bit samples
-    int frames = bytes_read / 8;
-    int output_samples = 0;
-
-    for(int i = 0; i < frames && output_samples < buf_len; i++)
+    while(true)
     {
-        // SEL connected to GND (left channel) by default
-        int32_t raw = samples[i * 2];
+        size_t bytes_read = 0;
+        ESP_ERROR_CHECK(i2s_channel_read(rx_chan, samples, sizeof(samples), &bytes_read, portMAX_DELAY));
 
-        // SPH6045 produces 18-bit signed data, shift bits
-        int32_t audio = raw >> 14;
+        // stereo = left + right 32-bit samples
+        int frames = bytes_read / 8;
 
-        // sign extension
-        if(audio & 0x20000)
+        for(int i = 0; i < frames; i++)
         {
-            audio |= 0xFFFC0000;
+            // SEL connected to GND (left channel) by default
+            int32_t raw = samples[i * 2];
+
+            // SPH6045 produces 18-bit signed data, shift bits
+            int32_t audio = raw >> 14;
+
+            // sign extension
+            if(audio & 0x20000)
+            {
+                audio |= 0xFFFC0000;
+            }
+
+            // estimate and remove DC offset with slow moving average
+            dc_estimate += (audio - dc_estimate) >> 8;
+            int32_t filtered = audio - dc_estimate;
+
+            // convert to 16-bit PCM for processing
+            slice[slice_pos++] = filtered >> 2;
+
+            if (slice_pos == EI_CLASSIFIER_SLICE_SIZE)
+            {
+                if (xQueueSend(mic_queue, slice, 0) != pdTRUE)
+                {
+                    ESP_LOGW(TAG, "Mic queue full, dropped a slice");
+                }
+                slice_pos = 0;
+            }
         }
-
-        // estimate and remove DC offset with slow moving average
-        dc_estimate += (audio - dc_estimate) >> 8;
-        int32_t filtered = audio - dc_estimate;
-
-        // convert to 16-bit PCM for processing
-        buffer[output_samples] = filtered >> 2;
-
-        output_samples++;
     }
+}
 
-    return output_samples;
+void start_mic_task()
+{
+    xTaskCreatePinnedToCore(mic_task, "mic_task", 4096, NULL, configMAX_PRIORITIES - 2, NULL, 1);
+}
+
+int mic_read(int16_t *buffer, uint32_t timeout_ms)
+{
+    if (xQueueReceive(mic_queue, buffer, pdMS_TO_TICKS(timeout_ms)) == pdTRUE)
+    {
+        return EI_CLASSIFIER_SLICE_SIZE;
+    }
+    return 0;
 }

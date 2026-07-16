@@ -1,10 +1,12 @@
 #include <stdio.h>
 #include <stdint.h>
+#include "esp_log.h"
 #include "edge_impulse.h"
 #include "microphone.h"
 #include "edge-impulse-sdk/classifier/ei_run_classifier.h"
 #include "edge-impulse-sdk/dsp/numpy.hpp"
-#include "model-parameters/model_metadata.h"
+
+static const char* TAG = "EdgeImpulse";
 
 // double buffer for continuous inference
 typedef struct
@@ -44,18 +46,16 @@ static int get_signal_data(size_t offset, size_t length, float *out_ptr)
     return 0;
 }
 
-void edge_impulse_run()
+ei_impulse_result_t edge_impulse_run()
 {
-    // fill one slice from microphone
-    int samples_read = read_input(
-        inference.buffers[inference.buf_select],
-        EI_CLASSIFIER_SLICE_SIZE
-    );
+    ei_impulse_result_t result = {};
 
-
-    if(samples_read != EI_CLASSIFIER_SLICE_SIZE)
+    // pull one full slice from the mic queue (waits up to 100ms)
+    int samples_read = mic_read(inference.buffers[inference.buf_select], 100);
+    if (samples_read != EI_CLASSIFIER_SLICE_SIZE)
     {
-        return;
+        // not enough samples yet, nothing to classify
+        return result;
     }
 
     // switch buffers
@@ -67,8 +67,6 @@ void edge_impulse_run()
     signal.total_length = EI_CLASSIFIER_SLICE_SIZE;
     signal.get_data = get_signal_data;
 
-    ei_impulse_result_t result;
-
     EI_IMPULSE_ERROR res = run_classifier_continuous(
         &signal,
         &result,
@@ -78,18 +76,8 @@ void edge_impulse_run()
     if(res != EI_IMPULSE_OK)
     {
         printf("Classifier failed\n");
-        return;
+        return result;
     }
 
-    for(size_t i = 0; i < EI_CLASSIFIER_LABEL_COUNT; i++)
-    {
-        if(strcmp(result.classification[i].label, "noise") != 0 && 
-        strcmp(result.classification[i].label, "unknown") != 0 && 
-        result.classification[i].value > 0.75)
-        {
-            printf("Detected: %s", result.classification[i].label);
-        }
-    }
-
-    printf("\n");
+    return result;
 }

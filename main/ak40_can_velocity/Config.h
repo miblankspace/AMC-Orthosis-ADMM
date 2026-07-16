@@ -1,11 +1,14 @@
+// config.h
 #pragma once
-
-#include <Arduino.h>
+#include <stdint.h>
+#include "driver/gpio.h"
 
 namespace Config {
 
-static constexpr uint8_t kCanCsPin = 10;
-static constexpr uint8_t kCanIntPin = 2;
+// TWAI transceiver pins (SN65HVD230), replaces CS/INT pins from MCP2515
+static constexpr gpio_num_t kCanTxPin = GPIO_NUM_4;  // set to your actual wiring
+static constexpr gpio_num_t kCanRxPin = GPIO_NUM_5;  // set to your actual wiring
+
 static constexpr uint8_t kMotorId = 69;
 
 static constexpr int32_t kDefaultErpm = 800;

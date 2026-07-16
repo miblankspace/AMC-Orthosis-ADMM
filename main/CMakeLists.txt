@@ -1,7 +1,8 @@
 idf_component_register(
     SRCS "main.cpp" "microphone/microphone.cpp" "classifier/edge_impulse.cpp" "state_machine/state_machine.cpp"
-    INCLUDE_DIRS "." "microphone" "state_machine" "classifier"
-    REQUIRES edge_impulse "esp_driver_i2s" esp_timer
+        "ak40_can_velocity/MotionController.cpp" "ak40_can_velocity/MotorCAN.cpp" "ak40_can_velocity/Status.cpp"
+    INCLUDE_DIRS "." "microphone" "state_machine" "classifier" "ak40_can_velocity"
+    REQUIRES edge_impulse "esp_driver_i2s" esp_timer esp_driver_gpio driver
 )
 
 target_compile_definitions(${COMPONENT_LIB} PUBLIC

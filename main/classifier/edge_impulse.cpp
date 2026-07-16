@@ -32,6 +32,9 @@ void edge_impulse_init()
     inference.buf_ready = false;
 
     inference.n_samples = EI_CLASSIFIER_SLICE_SIZE;
+
+    // Required before run_classifier_continuous()
+    run_classifier_init();
 }
 
 // give samples from part of buffer
@@ -50,8 +53,8 @@ ei_impulse_result_t edge_impulse_run()
 {
     ei_impulse_result_t result = {};
 
-    // pull one full slice from the mic queue (waits up to 100ms)
-    int samples_read = mic_read(inference.buffers[inference.buf_select], 100);
+    // Non-blocking: never stall the motor/serial loop waiting for audio.
+    int samples_read = mic_read(inference.buffers[inference.buf_select], 0);
     if (samples_read != EI_CLASSIFIER_SLICE_SIZE)
     {
         // not enough samples yet, nothing to classify

@@ -1,7 +1,7 @@
 #pragma once
 #include <stdint.h>
 #include "driver/twai.h"
-#include "status.h"
+#include "Status.h"
 
 // Low-level CAN transport (ESP32 native TWAI) and AK40 servo CAN protocol adapter.
 class MotorCAN {
@@ -14,6 +14,7 @@ public:
     bool reconnect();
     bool servoSetRPM(int32_t erpm);
     bool servoSetDuty(float duty);
+    void printBusStatus() const;
 
     const Status& getStatus() const;
     Status& getStatus();
@@ -26,10 +27,12 @@ private:
     bool processServoFrame();
     void sendHandshakeReply();
     void appendI32BE(uint8_t* buf, int32_t value) const;
+    void recoverIfBusOff();
 
     gpio_num_t txPin_;
     gpio_num_t rxPin_;
     uint8_t motorId_;
     twai_message_t rxFrame_;
     Status status_;
+    uint32_t lastTxFailLogMs_ = 0;
 };

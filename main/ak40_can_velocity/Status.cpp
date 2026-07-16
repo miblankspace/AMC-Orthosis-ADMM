@@ -1,4 +1,4 @@
-#include "status.h"
+#include "Status.h"
 #include <stdio.h>
 #include "MotionController.h"
 

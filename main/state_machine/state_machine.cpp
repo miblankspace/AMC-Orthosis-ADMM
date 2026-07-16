@@ -1,6 +1,6 @@
 #include "state_machine.h"
 
-#include "config.h"
+#include "Config.h"
 
 #include <string.h>
 

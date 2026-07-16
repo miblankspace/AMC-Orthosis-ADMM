@@ -1,6 +1,9 @@
 #include "MotorCAN.h"
-#include "esp_timer.h"
+
+#include <stdio.h>
+
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -17,8 +20,14 @@ MotorCAN::MotorCAN(gpio_num_t txPin, gpio_num_t rxPin, uint8_t motorId)
 bool MotorCAN::begin()
 {
     twai_general_config_t g_config = TWAI_GENERAL_CONFIG_DEFAULT(txPin_, rxPin_, TWAI_MODE_NORMAL);
-    twai_timing_config_t t_config = TWAI_TIMING_CONFIG_1MBITS(); // matches CAN_1000KBPS
+    // Larger TX queue helps when the bus is briefly busy.
+    g_config.tx_queue_len = 10;
+
+    twai_timing_config_t t_config = TWAI_TIMING_CONFIG_1MBITS();  // AK40 servo CAN = 1 Mbps
     twai_filter_config_t f_config = TWAI_FILTER_CONFIG_ACCEPT_ALL();
+
+    ESP_LOGI(TAG, "TWAI TX=GPIO%d RX=GPIO%d motorId=%u @1Mbps",
+             (int)txPin_, (int)rxPin_, (unsigned)motorId_);
 
     if (twai_driver_install(&g_config, &t_config, &f_config) != ESP_OK) {
         ESP_LOGE(TAG, "twai_driver_install failed");
@@ -33,8 +42,60 @@ bool MotorCAN::begin()
 
 void MotorCAN::poll()
 {
+    recoverIfBusOff();
     while (readCanFrame(0)) {
         processServoFrame();
+    }
+}
+
+void MotorCAN::printBusStatus() const
+{
+    twai_status_info_t info = {};
+    if (twai_get_status_info(&info) != ESP_OK) {
+        printf("TWAI: status read failed\n");
+        return;
+    }
+
+    const char* state = "UNKNOWN";
+    switch (info.state) {
+        case TWAI_STATE_STOPPED: state = "STOPPED"; break;
+        case TWAI_STATE_RUNNING: state = "RUNNING"; break;
+        case TWAI_STATE_BUS_OFF: state = "BUS_OFF"; break;
+        case TWAI_STATE_RECOVERING: state = "RECOVERING"; break;
+    }
+
+    printf("TWAI state=%s tx_err=%lu rx_err=%lu tx_failed=%lu rx_missed=%lu "
+           "arb_lost=%lu bus_err=%lu\n",
+           state,
+           (unsigned long)info.tx_error_counter,
+           (unsigned long)info.rx_error_counter,
+           (unsigned long)info.tx_failed_count,
+           (unsigned long)info.rx_missed_count,
+           (unsigned long)info.arb_lost_count,
+           (unsigned long)info.bus_error_count);
+}
+
+void MotorCAN::recoverIfBusOff()
+{
+    twai_status_info_t info = {};
+    if (twai_get_status_info(&info) != ESP_OK) {
+        return;
+    }
+
+    // After bus-off recovery, TWAI ends in STOPPED and must be started again.
+    if (info.state == TWAI_STATE_BUS_OFF) {
+        ESP_LOGW(TAG, "TWAI bus-off - initiating recovery");
+        twai_initiate_recovery();
+        return;
+    }
+
+    if (info.state == TWAI_STATE_STOPPED) {
+        const esp_err_t err = twai_start();
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "TWAI restarted after STOPPED");
+        } else {
+            ESP_LOGW(TAG, "TWAI restart failed: %s", esp_err_to_name(err));
+        }
     }
 }
 
@@ -61,6 +122,7 @@ bool MotorCAN::servoConnect()
         }
     }
 
+    printBusStatus();
     return status_.hasStatus();
 }
 
@@ -90,6 +152,8 @@ uint32_t MotorCAN::servoExtId(uint8_t functionId) const
 
 bool MotorCAN::sendExt(uint32_t id29, const uint8_t* data, uint8_t len)
 {
+    recoverIfBusOff();
+
     twai_message_t tx = {};
     tx.identifier = id29 & 0x1FFFFFFF;
     tx.extd = 1;
@@ -97,7 +161,19 @@ bool MotorCAN::sendExt(uint32_t id29, const uint8_t* data, uint8_t len)
     for (uint8_t i = 0; i < len; ++i) {
         tx.data[i] = data[i];
     }
-    return twai_transmit(&tx, pdMS_TO_TICKS(100)) == ESP_OK;
+
+    const esp_err_t err = twai_transmit(&tx, pdMS_TO_TICKS(50));
+    if (err == ESP_OK) {
+        return true;
+    }
+
+    const uint32_t now = millis();
+    if (now - lastTxFailLogMs_ >= 2000) {
+        ESP_LOGW(TAG, "TX failed (%s)", esp_err_to_name(err));
+        printBusStatus();
+        lastTxFailLogMs_ = now;
+    }
+    return false;
 }
 
 bool MotorCAN::readCanFrame(uint32_t timeoutMs)

@@ -30,8 +30,11 @@ void init_i2s()
 {
     i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
 
-    // create channel
-    ESP_ERROR_CHECK(i2s_new_channel(&chan_cfg, NULL, &rx_chan));
+    esp_err_t err = i2s_new_channel(&chan_cfg, NULL, &rx_chan);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "i2s_new_channel failed: %s", esp_err_to_name(err));
+        return;
+    }
 
     i2s_std_config_t std_cfg =
     {
@@ -53,9 +56,17 @@ void init_i2s()
         }
     };
 
-    // initialize and enable channel
-    ESP_ERROR_CHECK(i2s_channel_init_std_mode(rx_chan, &std_cfg));
-    ESP_ERROR_CHECK(i2s_channel_enable(rx_chan));
+    err = i2s_channel_init_std_mode(rx_chan, &std_cfg);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "i2s_channel_init_std_mode failed: %s", esp_err_to_name(err));
+        return;
+    }
+
+    err = i2s_channel_enable(rx_chan);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "i2s_channel_enable failed: %s", esp_err_to_name(err));
+        return;
+    }
 
     mic_queue = xQueueCreate(QUEUE_DEPTH, EI_CLASSIFIER_SLICE_SIZE * sizeof(int16_t));
     if (!mic_queue)
@@ -67,6 +78,12 @@ void init_i2s()
 // runs forever on its own task, signal processing, pushes into mic_queue to be read by EI
 static void mic_task(void* arg)
 {
+    if (!rx_chan || !mic_queue) {
+        ESP_LOGW(TAG, "Mic not ready; task exiting");
+        vTaskDelete(NULL);
+        return;
+    }
+
     static int16_t slice[EI_CLASSIFIER_SLICE_SIZE];
     int slice_pos = 0;
 
@@ -103,7 +120,12 @@ static void mic_task(void* arg)
             {
                 if (xQueueSend(mic_queue, slice, 0) != pdTRUE)
                 {
-                    ESP_LOGW(TAG, "Mic queue full, dropped a slice");
+                    static uint32_t lastWarnMs = 0;
+                    const uint32_t nowMs = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
+                    if (nowMs - lastWarnMs > 5000) {
+                        ESP_LOGW(TAG, "Mic queue full, dropped a slice");
+                        lastWarnMs = nowMs;
+                    }
                 }
                 slice_pos = 0;
             }
@@ -118,6 +140,9 @@ void start_mic_task()
 
 int mic_read(int16_t *buffer, uint32_t timeout_ms)
 {
+    if (!mic_queue) {
+        return 0;
+    }
     if (xQueueReceive(mic_queue, buffer, pdMS_TO_TICKS(timeout_ms)) == pdTRUE)
     {
         return EI_CLASSIFIER_SLICE_SIZE;

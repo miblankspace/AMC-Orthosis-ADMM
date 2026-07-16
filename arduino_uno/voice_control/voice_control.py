@@ -1,15 +1,23 @@
 import json
 import queue
+import threading
+import serial
 import sounddevice as sd
 from vosk import Model, KaldiRecognizer
-import serial
 
-# ---------- SETTINGS ----------
+# =====================================================
+# SETTINGS
+# =====================================================
+
 MODEL_PATH = "vosk-model-small-en-us-0.15"
+
 COM_PORT = "COM15"
 BAUD = 115200
-SAMPLE_RATE = 16000
-# ------------------------------
+
+MIC_DEVICE = 18          # AB13X USB Audio microphone
+SAMPLE_RATE = 48000      # Use your microphone's default sample rate
+
+# =====================================================
 
 print("Loading Vosk model...")
 model = Model(MODEL_PATH)
@@ -20,56 +28,132 @@ recognizer = KaldiRecognizer(
     '["up", "down", "stop", "help"]'
 )
 
-q = queue.Queue()
+audio_queue = queue.Queue()
 
 print("Connecting to Arduino...")
-ser = serial.Serial(COM_PORT, BAUD)
+ser = serial.Serial(COM_PORT, BAUD, timeout=0.1)
 
-print("Ready!")
+print("Connected!")
 
-def callback(indata, frames, time, status):
-    q.put(bytes(indata))
+# -----------------------------------------------------
+# Read Arduino messages continuously
+# -----------------------------------------------------
 
-with sd.RawInputStream(
-        samplerate=SAMPLE_RATE,
-        blocksize=8000,
-        dtype='int16',
-        channels=1,
-        callback=callback):
-
-    print("\nListening...\n")
+def serial_reader():
 
     while True:
 
-        data = q.get()
+        try:
+
+            if ser.in_waiting:
+
+                line = ser.readline().decode(errors="ignore").strip()
+
+                if line:
+
+                    print(f"\n[Arduino] {line}")
+
+        except Exception as e:
+
+            print("Serial Error:", e)
+            break
+
+
+threading.Thread(target=serial_reader, daemon=True).start()
+
+# -----------------------------------------------------
+# Audio callback
+# -----------------------------------------------------
+
+def callback(indata, frames, time, status):
+
+    if status:
+        print(status)
+
+    audio_queue.put(bytes(indata))
+
+# -----------------------------------------------------
+# Main
+# -----------------------------------------------------
+
+print("\n===================================")
+print(" Voice Controller Ready")
+print(" Say:")
+print("   Up")
+print("   Down")
+print("   Stop")
+print("   Help")
+print("===================================\n")
+
+with sd.RawInputStream(
+        samplerate=SAMPLE_RATE,
+        blocksize=4800,
+        device=MIC_DEVICE,
+        dtype="int16",
+        channels=1,
+        callback=callback):
+
+    while True:
+
+        data = audio_queue.get()
 
         if recognizer.AcceptWaveform(data):
 
             result = json.loads(recognizer.Result())
 
-            text = result.get("text","")
+            text = result.get("text", "").strip()
 
             if text == "":
                 continue
 
-            print("Heard:", text)
+            print(f"\nHeard : {text}")
 
-            if "up" in text:
+            # -----------------------------
+            # UP
+            # -----------------------------
 
-                print(">>> UP")
+            if text == "up":
+
+                print(">>> Sending UP")
+
                 ser.write(b"v 500\n")
 
-            elif "down" in text:
+            # -----------------------------
+            # DOWN
+            # -----------------------------
 
-                print(">>> DOWN")
+            elif text == "down":
+
+                print(">>> Sending DOWN")
+
                 ser.write(b"v -500\n")
 
-            elif "stop" in text:
+            # -----------------------------
+            # STOP
+            # -----------------------------
 
-                print(">>> STOP")
+            elif text == "stop":
+
+                print(">>> Sending STOP")
+
                 ser.write(b"s\n")
 
-            elif "help" in text:
+            # -----------------------------
+            # HELP
+            # -----------------------------
 
-                print(">>> HELP")
+            elif text == "help":
+
+                print(">>> EMERGENCY STOP")
+
                 ser.write(b"s\n")
+
+        else:
+
+            partial = json.loads(recognizer.PartialResult())
+
+            p = partial.get("partial", "")
+
+            if p:
+
+                print(f"\rListening : {p}          ", end="")

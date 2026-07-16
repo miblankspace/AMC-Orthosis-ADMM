@@ -24,7 +24,7 @@ static const uint8_t MOTOR_ID    = 69;
 // --- tune here ---
 static const int32_t DEFAULT_ERPM = 800;   // start speed (+ = one direction)
 static const int32_t MAX_ERPM     = 3000;  // safety clamp
-static const bool    AUTO_START   = true;  // spin on boot after connect
+static const bool    AUTO_START   = false;  // spin on boot after connect
 static const uint32_t CMD_PERIOD_MS = 100; // re-send RPM setpoint
 static const uint32_t STATUS_PERIOD_MS = 500;
 
@@ -78,26 +78,41 @@ static bool readCanFrame(uint32_t timeoutMs) {
   return false;
 }
 
+static int16_t g_rawCurrent = 0;
+
 static void parseStatusFrame() {
   int16_t posRaw = (int16_t)((rxFrame.data[0] << 8) | rxFrame.data[1]);
   int16_t spdRaw = (int16_t)((rxFrame.data[2] << 8) | rxFrame.data[3]);
+
+  // Raw bytes 4 & 5
+  g_rawCurrent = (int16_t)((rxFrame.data[4] << 8) | rxFrame.data[5]);
+
   g_posDeg = posRaw * 0.1f;
   g_spdErpm = spdRaw * 10.0f;
+
   g_tempC = (int8_t)rxFrame.data[6];
   g_err = rxFrame.data[7];
+
   g_haveStatus = true;
 }
 
 static void printStatus() {
   Serial.print("cmd_erpm=");
   Serial.print(g_targetErpm);
+
   Serial.print("  meas_erpm=");
   Serial.print(g_spdErpm, 0);
+
   Serial.print("  pos=");
   Serial.print(g_posDeg, 1);
-  Serial.print(" deg  temp=");
+
+  Serial.print("  rawCurrent=");
+  Serial.print(g_rawCurrent);
+
+  Serial.print("  temp=");
   Serial.print(g_tempC);
-  Serial.print(" C  err=");
+
+  Serial.print("C  err=");
   Serial.println(g_err);
 }
 

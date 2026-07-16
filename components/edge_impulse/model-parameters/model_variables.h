@@ -46,7 +46,7 @@
 #include "edge-impulse-sdk/classifier/inferencing_engines/engines.h"
 #include "edge-impulse-sdk/classifier/postprocessing/ei_postprocessing_common.h"
 
-const char* ei_classifier_inferencing_categories_1053353_2[] = { "arm_down", "arm_help", "arm_up", "down", "noise", "stop", "unknown", "up" };
+const char* ei_classifier_inferencing_categories_1053353_2[] = { "activate", "down", "help", "noise", "stop", "unknown", "up" };
 
 ei_dsp_named_axis_t ei_dsp_config_1053353_4_named_axes[] = {
     { .name = "Signal", .axis = 0 }
@@ -151,7 +151,7 @@ const ei_impulse_t impulse_1053353_2 = {
     .project_name = "ADMM-orthosis",
     .impulse_id = 2,
     .impulse_name = "Impulse #2",
-    .deploy_version = 3,
+    .deploy_version = 14,
 
     .nn_input_frame_size = 637,
     .raw_sample_count = 16000,
@@ -182,7 +182,7 @@ const ei_impulse_t impulse_1053353_2 = {
     .slices_per_model_window = 4,
 
     .has_anomaly = EI_ANOMALY_TYPE_UNKNOWN,
-    .label_count = 8,
+    .label_count = 7,
     .categories = ei_classifier_inferencing_categories_1053353_2,
     .results_type = EI_CLASSIFIER_TYPE_CLASSIFICATION,
     .freeform_outputs_size = freeform_outputs_1053353_2_size,

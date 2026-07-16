@@ -11,6 +11,7 @@
 #define I2S_DIN 16
 
 #define SAMPLE_RATE 16000
+#define MIC_MAX_SAMPLES 4000
 
 i2s_chan_handle_t rx_chan;
 
@@ -48,11 +49,11 @@ void init_i2s()
 }
 
 static int32_t dc_estimate = 0;
+static int32_t samples[MIC_MAX_SAMPLES * 2];
 
 // collect samples, write into buffer, return # of samples collected
 int read_input(int16_t *buffer, int buf_len)
 {
-    int32_t samples[buf_len * 2];
     size_t bytes_read = 0;
 
     ESP_ERROR_CHECK(i2s_channel_read(rx_chan, samples, sizeof(samples), &bytes_read, portMAX_DELAY));

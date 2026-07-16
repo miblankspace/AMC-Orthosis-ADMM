@@ -1,5 +1,5 @@
 idf_component_register(
-    SRCS "main.cpp" "microphone/microphone.cpp"
+    SRCS "main.cpp" "microphone/microphone.cpp" "classifier/edge_impulse.cpp"
     INCLUDE_DIRS "." "microphone" "state_machine" "enums" "classifier"
     REQUIRES edge_impulse "esp_driver_i2s"
 )
